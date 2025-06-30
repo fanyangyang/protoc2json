@@ -262,6 +262,42 @@
             return result;
         }
 
+        // --- 递归处理字符串中的转义字符 ---
+        function decodeEscapedString(str) {
+            // 处理 \xxx（八进制）和 \uXXXX（十六进制）
+            // 主要针对 protobuf 的 utf-8 字节序列，如 \345\210\232
+            // 先处理 \uXXXX
+            str = str.replace(/\\u([0-9a-fA-F]{4})/g, (m, g1) => String.fromCharCode(parseInt(g1, 16)));
+            // 再处理连续的 \\ddd（八进制，最多3位）
+            // 例如: \\345\\210\\232
+            str = str.replace(/(\\[0-7]{3})+/g, (m) => {
+                // m 形如 \\345\\210\\232
+                let bytes = m.match(/\\([0-7]{3})/g).map(s => parseInt(s.replace('\\', ''), 8));
+                // utf-8 解码
+                try {
+                    return new TextDecoder('utf-8').decode(new Uint8Array(bytes));
+                } catch {
+                    return m;
+                }
+            });
+            return str;
+        }
+        function decodeObject(obj) {
+            if (typeof obj === 'string') {
+                return decodeEscapedString(obj);
+            } else if (Array.isArray(obj)) {
+                return obj.map(decodeObject);
+            } else if (typeof obj === 'object' && obj !== null) {
+                let res = {};
+                for (let k in obj) {
+                    res[k] = decodeObject(obj[k]);
+                }
+                return res;
+            } else {
+                return obj;
+            }
+        }
+
         // --- Vue App ---
         const { createApp, ref } = Vue;
         createApp({
@@ -272,7 +308,8 @@
                 function toJson() {
                     try {
                         const obj = parsePrototext(input.value);
-                        output.value = JSON.stringify(obj, null, 2);
+                        const decoded = decodeObject(obj);
+                        output.value = JSON.stringify(decoded, null, 2);
                     } catch (e) {
                         output.value = '解析失败：' + e.message;
                     }
