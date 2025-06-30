@@ -15,7 +15,8 @@
         }
 
         .container {
-            max-width: 1100px;
+            max-width: 1600px;
+            width: 90vw;
             margin: 40px auto;
             background: #fff;
             border-radius: 10px;
@@ -44,7 +45,7 @@
 
         .block {
             flex: 1 1 0;
-            min-width: 320px;
+            min-width: 480px;
             display: flex;
             flex-direction: column;
         }
@@ -103,11 +104,17 @@
             word-break: break-all;
             color: #222;
             margin-bottom: 10px;
+            min-width: 400px;
+            max-width: 100%;
         }
 
         @media (max-width: 900px) {
             .main {
                 flex-direction: column;
+            }
+
+            .output {
+                min-width: 0;
             }
         }
     </style>
@@ -129,7 +136,10 @@
                 </div>
                 <div class="block">
                     <label for="output">JSON 输出</label>
-                    <div class="output" id="output">{{ output }}</div>
+                    <div class="output" id="output">
+                        <component v-if="jsonObj !== null" :is="'json-tree'" :data="jsonObj" :level="0" />
+                        <div v-else>{{ output }}</div>
+                    </div>
                     <div class="btns">
                         <button @click="copyOutput">复制 JSON</button>
                     </div>
@@ -299,44 +309,136 @@
         }
 
         // --- Vue App ---
-        const { createApp, ref } = Vue;
-        createApp({
-            setup() {
-                const input = ref('');
-                const output = ref('');
+        const { createApp, ref, defineComponent, h } = Vue;
 
-                function toJson() {
+        // JSON 折叠树组件
+        const JsonTree = defineComponent({
+            name: 'JsonTree',
+            props: {
+                data: { type: [Object, Array, String, Number, Boolean, null], required: true },
+                level: { type: Number, default: 0 }
+            },
+            data() {
+                return { collapsed: false };
+            },
+            methods: {
+                toggle() {
+                    this.collapsed = !this.collapsed;
+                }
+            },
+            render() {
+                const indent = (n) => h('span', { style: { display: 'inline-block', width: n * 18 + 'px' } }, '');
+                if (typeof this.data === 'object' && this.data !== null) {
+                    const isArray = Array.isArray(this.data);
+                    const keys = isArray ? this.data.map((_, i) => i) : Object.keys(this.data);
+                    const open = isArray ? '[' : '{';
+                    const close = isArray ? ']' : '}';
+                    return h('div', {}, [
+                        h('div', { style: 'cursor:pointer;user-select:none;' }, [
+                            indent(this.level),
+                            h('span', {
+                                style: 'color:#409eff;font-weight:bold;',
+                                onClick: this.toggle
+                            }, this.collapsed ? '+' : '-'),
+                            h('span', { style: 'margin-left:4px;color:#888;' }, open + (keys.length === 0 ? close : ''))
+                        ]),
+                        !this.collapsed && keys.length > 0 ?
+                            keys.map((k, idx) => h('div', {}, [
+                                indent(this.level + 1),
+                                !isArray ? h('span', { style: 'color:#b37feb;' }, k + ': ') : null,
+                                typeof this.data[k] === 'object' && this.data[k] !== null
+                                    ? h(JsonTree, { data: this.data[k], level: this.level + 1 })
+                                    : h('span', { style: 'color:#222;' }, JSON.stringify(this.data[k])),
+                                idx < keys.length - 1 ? h('span', {}, ',') : null
+                            ])) : null,
+                        h('div', {}, [indent(this.level), h('span', { style: 'color:#888;' }, close)])
+                    ]);
+                } else {
+                    // 基本类型
+                    return h('span', { style: 'color:#222;' }, JSON.stringify(this.data));
+                }
+            }
+        });
+
+        createApp({
+            components: { JsonTree },
+            data() {
+                return {
+                    input: '',
+                    output: '',
+                    jsonObj: null
+                };
+            },
+            methods: {
+                toJson() {
                     try {
-                        const obj = parsePrototext(input.value);
+                        const obj = parsePrototext(this.input);
                         const decoded = decodeObject(obj);
-                        output.value = JSON.stringify(decoded, null, 2);
+                        this.output = JSON.stringify(decoded, null, 2);
+                        this.jsonObj = decoded;
                     } catch (e) {
-                        output.value = '解析失败：' + e.message;
+                        this.output = '解析失败：' + e.message;
+                        this.jsonObj = null;
                     }
+                },
+                formatInput() {
+                    this.toJson();
+                },
+                clearInput() {
+                    this.input = '';
+                    this.output = '';
+                    this.jsonObj = null;
+                },
+                copyOutput() {
+                    if (!this.output) return;
+                    navigator.clipboard.writeText(this.output);
                 }
-                function formatInput() {
-                    toJson();
-                }
-                function clearInput() {
-                    input.value = '';
-                    output.value = '';
-                }
-                function copyOutput() {
-                    if (!output.value) return;
-                    navigator.clipboard.writeText(output.value);
-                }
-                // 自动解析
-                watchInput();
-                function watchInput() {
-                    let last = '';
-                    setInterval(() => {
-                        if (input.value !== last) {
-                            last = input.value;
-                            toJson();
-                        }
-                    }, 400);
-                }
-                return { input, output, formatInput, clearInput, copyOutput };
+            },
+            mounted() {
+                let last = '';
+                setInterval(() => {
+                    if (this.input !== last) {
+                        last = this.input;
+                        this.toJson();
+                    }
+                }, 400);
+            },
+            render() {
+                // 复用原有样式和结构
+                return h('div', { class: 'container' }, [
+                    h('h1', 'Prototext 转 JSON 工具'),
+                    h('div', { class: 'desc' }, '支持 Protobuf text format（pbtxt/prototext）转 JSON，支持嵌套、数组。可直接部署到 GitHub Pages。'),
+                    h('div', { class: 'main' }, [
+                        h('div', { class: 'block' }, [
+                            h('label', { for: 'input' }, 'Prototext 输入'),
+                            h('textarea', {
+                                id: 'input',
+                                value: this.input,
+                                onInput: e => { this.input = e.target.value; }
+                            }),
+                            h('div', { class: 'btns' }, [
+                                h('button', { onClick: this.formatInput }, '格式化输入'),
+                                h('button', { onClick: this.clearInput }, '清空')
+                            ])
+                        ]),
+                        h('div', { class: 'block' }, [
+                            h('label', { for: 'output' }, 'JSON 输出'),
+                            h('div', { class: 'output', id: 'output' }, [
+                                this.jsonObj !== null
+                                    ? h(JsonTree, { data: this.jsonObj, level: 0 })
+                                    : h('div', this.output)
+                            ]),
+                            h('div', { class: 'btns' }, [
+                                h('button', { onClick: this.copyOutput }, '复制 JSON')
+                            ])
+                        ])
+                    ]),
+                    h('div', { style: 'color:#888;font-size:0.95rem;margin-top:18px;' }, [
+                        '开源地址：',
+                        h('a', { href: 'https://github.com/', target: '_blank' }, 'GitHub Pages'),
+                        ' | 仅供学习交流'
+                    ])
+                ]);
             }
         }).mount('#app');
     </script>
